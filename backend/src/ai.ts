@@ -1,0 +1,118 @@
+import dotenv from "dotenv"
+
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"
+
+dotenv.config()
+const API_KEY = process.env.GEMINI_API_KEY!
+
+console.log("Gemini key loaded:", API_KEY)
+
+async function callGemini(prompt: string): Promise<string> {
+  const res = await fetch(`${GEMINI_URL}?key=${API_KEY}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [{ text: prompt }]
+        }
+      ]
+    })
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Gemini error: ${err}`)
+  }
+
+  const data = await res.json()
+    // Gemini response safety
+  const text =
+    data.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
+
+  return text.replace(/```json|```/g, "").trim()
+}
+
+/* ---------------- QUESTIONS ---------------- */
+
+export async function generateQuestions(
+  topic: string,
+  difficulty: string
+): Promise<string[]> {
+  const prompt = `
+You are a game show host.
+
+Generate exactly 5 short questions.
+Topic: ${topic}
+Difficulty: ${difficulty}
+
+Rules:
+- Max 1 sentence per question
+- No numbering
+- Return ONLY valid JSON array of strings
+`
+
+  const text = await callGemini(prompt)
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    console.error("Invalid questions JSON:", text)
+    return []
+  }
+}
+
+/* ---------------- JUDGING ---------------- */
+
+export async function judgeAnswer(
+  question: string,
+  answer: string
+): Promise<{ score: number; feedback: string }> {
+  const prompt = `
+You are a strict but fair game judge.
+
+Question:
+"${question}"
+
+Player answer:
+"${answer}"
+
+Rules:
+- Score from 0 to 10 (integer only)
+- 1 short feedback sentence
+- Return ONLY valid JSON
+
+Format:
+{
+  "score": number,
+  "feedback": string
+}
+`
+
+  const text = await callGemini(prompt)
+
+  try {
+    const result = JSON.parse(text)
+    return {
+      score: Math.max(0, Math.min(10, result.score)),
+      feedback: result.feedback || ""
+    }
+  } catch {
+    console.error("Invalid judge JSON:", text)
+    return { score: 0, feedback: "Could not judge answer." }
+  }
+}
+
+/* ---------------- AI HOST INTRO ---------------- */
+
+export async function aiIntro(): Promise<string> {
+  const prompt = `
+You are a sarcastic, playful game host.
+Introduce yourself in 1–2 short lines.
+No rules. No explanations.
+`
+  return callGemini(prompt)
+}
